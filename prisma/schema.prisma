@@ -1,0 +1,107 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       String     @id @default(uuid())
+  fullname String
+  userName String     @unique
+  phone    String     @unique
+  adress   String
+  image    String?
+  password String
+  role     userRole   @default(SELLER)
+  Customer Customer[]
+  Payment  Payment[]
+  Sample   Sample[]
+}
+
+model Customer {
+  id            String          @id @default(uuid())
+  fullname      String
+  adress        String
+  userId        String
+  user          User            @relation(fields: [userId], references: [id])
+  CustomerPhone CustomerPhone[]
+  CustomerImage CustomerImage[]
+  Debt          Debt[]
+  Payment       Payment[]
+  Message       Message[]
+}
+
+model CustomerPhone {
+  id         String   @id @default(uuid())
+  customerId String
+  phone      String
+  customer   Customer @relation(fields: [customerId], references: [id])
+}
+
+model CustomerImage {
+  id         String   @id @default(uuid())
+  customerId String
+  image      String
+  customer   Customer @relation(fields: [customerId], references: [id])
+}
+
+model Debt {
+  id           String      @id @default(uuid())
+  customerId   String
+  total_amount Int
+  status       Boolean
+  date         DateTime
+  productName  String
+  customer     Customer    @relation(fields: [customerId], references: [id])
+  DebtImage    DebtImage[]
+  Payment      Payment[]
+}
+
+model DebtImage {
+  id     String @id @default(uuid())
+  image  String
+  debtId String
+  debt   Debt   @relation(fields: [debtId], references: [id])
+}
+
+model Payment {
+  id         String   @id @default(uuid())
+  amount     Int
+  debtId     String
+  userId     String
+  customerId String
+  debt       Debt     @relation(fields: [debtId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+  customer   Customer @relation(fields: [customerId], references: [id])
+}
+
+model Message {
+  id         String   @id @default(uuid())
+  text       String
+  customerId String
+  sampleId   String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  sample     Sample   @relation(fields: [sampleId], references: [id])
+}
+
+model Sample {
+  id      String    @id @default(uuid())
+  text    String
+  userId  String
+  user    User      @relation(fields: [userId], references: [id])
+  Message Message[]
+}
+
+enum userRole {
+  SELLER
+  ADMIN
+}
