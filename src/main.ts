@@ -2,7 +2,8 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-
+// import * as dotenv from 'dotenv';
+// dotenv.config();
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
@@ -18,9 +19,9 @@ async function bootstrap() {
 const documentFactory = () => SwaggerModule.createDocument(app, config);
 SwaggerModule.setup('api-docs', app, documentFactory);
 
-  await app.listen(process.env.PORT ?? 3005,()=> {
-    console.log("Server ishlamoqda");
-    
+   const port = process.env.PORT || 3005;
+  await app.listen(port, () => {
+    console.log(`Server ${port}-portda ishlamoqda`);
   });
 }
 bootstrap();
