@@ -1,159 +1,157 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-  HttpException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
-import { CreatePaymentDto } from './dto/create-payment.dto';
+import { AnyAmountPaymentDto } from './dto/any-amount-payment.dto';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
-import { PaymentMethod } from '@prisma/client';
+import { OneMonthPaymentDto } from './dto/one-month-payment.dto.ts';
+import { PayByMonthsDto } from './dto/by-months.dto';
 
 @Injectable()
 export class PaymentService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  // --- Statusni tekshiruvchi yordamchi funksiya
-  private async updateDebtStatus(debtId: string) {
-    const totalPaid = (
-      await this.prisma.payment.aggregate({
-        _sum: { amount: true },
-        where: { debtId },
-      })
-    )._sum.amount || 0;
+  // 🔹 Yagona helper: tx ixtiyoriy, Payment SUM(amount) bilan Debtni sinxronlaydi
 
-    const debt = await this.prisma.debt.findUnique({ where: { id: debtId } });
-    if (!debt) throw new NotFoundException('Qarz topilmadi');
+private async updateDebtStatus(
+  debtId: string,
+  tx?: Prisma.TransactionClient,
+): Promise<void> {
+  const db = tx ?? this.prisma;
 
-    const status = totalPaid >= debt.total_amount;
-    await this.prisma.debt.update({
-      where: { id: debtId },
-      data: { status },
-    });
-  }
+  const agg = await db.payment.aggregate({
+    where: { debtId },
+    _sum: { amount: true },
+  });
+  const paid = agg._sum.amount ?? 0;
 
-  async create(dto: CreatePaymentDto, userId: string) {
-    const { amount, method, debtId, customerId, monthNumber } = dto;
+  const debt = await db.debt.findUnique({
+    where: { id: debtId },
+    select: { total_amount: true },
+  });
+  if (!debt) return;
 
-    // --- 1. Qarzdorlik va mijoz mavjudligini tekshirish
-    const [debt, customer] = await Promise.all([
-      this.prisma.debt.findUnique({
-        where: { id: debtId },
-        include: { Payment: true },
-      }),
-      this.prisma.customer.findUnique({ where: { id: customerId } }),
-    ]);
+  await db.debt.update({
+    where: { id: debtId },
+    data: {
+      paid_amount: paid,
+      status: paid >= debt.total_amount,
+    },
+  });
+}
+async payOneMonth(dto: OneMonthPaymentDto, userId: string) {
+  const debt = await this.prisma.debt.findUnique({
+    where: { id: dto.debtId },
+    include: { Payment: { select: { monthNumber: true } } },
+  });
+  if (!debt) throw new NotFoundException('Qarz topilmadi');
+  if (debt.status) throw new BadRequestException('Bu qarz allaqachon yopilgan');
 
-    if (!debt) throw new NotFoundException('Qarz topilmadi');
-    if (!customer) throw new NotFoundException('Mijoz topilmadi');
+  const paidMonths = debt.Payment.map(p => p.monthNumber).filter((m): m is number => m != null);
+  const allMonths = Array.from({ length: debt.deadline_months }, (_, i) => i + 1);
+  const unpaid = allMonths.filter(m => !paidMonths.includes(m));
+  if (unpaid.length === 0) throw new BadRequestException('Barcha oylar to‘langan');
 
-    const paymentsToCreate: any[] = [];
+  const monthNumber = unpaid[0];
 
-    // --- 2. FULL — To‘liq to‘lov
-    if (method === PaymentMethod.FULL) {
-      if (debt.Payment.length > 0)
-        throw new BadRequestException("Bu qarzga allaqachon to'lov qilingan");
-
-      if (amount !== debt.total_amount)
-        throw new BadRequestException("To'liq to'lov uchun miqdor noto'g'ri");
-
-      paymentsToCreate.push({
-        amount,
-        method,
-        debtId,
-        customerId,
-        userId,
-      });
-    }
-    
-
-    // --- 3. BY_MONTH — avtomatik bir nechta oylik to‘lov
-    else if (method === PaymentMethod.BY_MONTH) {
-      const paidMonths = debt.Payment
-        .filter(p => p.monthNumber !== null)
-        .map(p => p.monthNumber);
-
-      const unpaidMonths = Array.from(
-        { length: debt.deadline_months },
-        (_, i) => i + 1,
-      ).filter(month => !paidMonths.includes(month));
-
-      let remaining = amount;
-
-      for (const m of unpaidMonths) {
-        if (remaining < debt.monthly_amount) break;
-
-        paymentsToCreate.push({
-          amount: debt.monthly_amount,
-          method,
-          monthNumber: m,
-          debtId,
-          customerId,
-          userId,
-        });
-
-        remaining -= debt.monthly_amount;
-      }
-
-      if (paymentsToCreate.length === 0) {
-        throw new BadRequestException(
-          "To'lov miqdori yetarli emas yoki barcha oylar to'langan",
-        );
-      }
+  await this.prisma.$transaction(async (tx) => {
+    // Hozirgi paid va remainingni tranzaksiya ichida hisoblang
+    const agg = await tx.payment.aggregate({ where: { debtId: dto.debtId }, _sum: { amount: true } });
+    const currentPaid = agg._sum.amount ?? 0;
+    const remaining = debt.total_amount - currentPaid;
+    if (debt.monthly_amount > remaining) {
+      throw new BadRequestException(`Qolgan qarz ${remaining} so‘m. Oylik ${debt.monthly_amount} so‘m sig‘maydi.`);
     }
 
-    // --- 4. PARTIAL / ANY_AMOUNT — istalgan miqdor (kam bo‘lishi mumkin)
-    else if (
-      method === PaymentMethod.PARTIAL ||
-      method === PaymentMethod.PARTIAL
-    ) {
-      if (amount <= 0)
-        throw new BadRequestException(
-          "To'lov miqdori nol yoki manfiy bo'lishi mumkin emas",
-        );
-
-      paymentsToCreate.push({
-        amount,
-        method,
-        debtId,
-        customerId,
-        userId,
-      });
-    }
-
-    // --- 5. To‘lovlarni bazaga yozish
-    if (paymentsToCreate.length > 1) {
-      await this.prisma.payment.createMany({ data: paymentsToCreate });
-    } else {
-      await this.prisma.payment.create({ data: paymentsToCreate[0] });
-    }
-
-    // --- 6. Statusni yangilash
-    await this.updateDebtStatus(debtId);
-
-    // --- 7. Mijozga xabar yuborish
-    const totalPaid = (
-      await this.prisma.payment.aggregate({
-        _sum: { amount: true },
-        where: { debtId },
-      })
-    )._sum.amount || 0;
-
-    const remaining = Math.max(debt.total_amount - totalPaid, 0);
-    await this.prisma.message.create({
-      data: {
-        customerId,
-        text: `Siz ${amount.toLocaleString()} so'm to'lov qildingiz. Qolgan qarzingiz: ${remaining.toLocaleString()} so'm.`,
-        sampleId: null,
-      },
+    await tx.payment.create({
+      data: { amount: debt.monthly_amount, monthNumber, debtId: dto.debtId, userId },
     });
 
-    return { message: "To'lov muvaffaqiyatli bajarildi" };
+    await this.updateDebtStatus(dto.debtId, tx);
+  });
+
+  return { message: `${monthNumber}-oy uchun to‘lov qabul qilindi` };
+}
+
+async payAnyAmount(dto: AnyAmountPaymentDto, userId: string) {
+  const debt = await this.prisma.debt.findUnique({ where: { id: dto.debtId } });
+  if (!debt) throw new NotFoundException('Qarz topilmadi');
+  if (debt.status) throw new BadRequestException('Bu qarz allaqachon yopilgan');
+
+  await this.prisma.$transaction(async (tx) => {
+    const agg = await tx.payment.aggregate({ where: { debtId: dto.debtId }, _sum: { amount: true } });
+    const currentPaid = agg._sum.amount ?? 0;
+    const remaining = debt.total_amount - currentPaid;
+    if (dto.amount > remaining) {
+      throw new BadRequestException(`Qolgan qarz ${remaining} so‘m. Ortig‘ini to‘lolmaysiz.`);
+    }
+
+    await tx.payment.create({
+      data: { amount: dto.amount, debtId: dto.debtId, userId },
+    });
+
+    await this.updateDebtStatus(dto.debtId, tx);
+  });
+
+  return { message: `${dto.amount.toLocaleString()} so‘m qabul qilindi` };
+}
+
+async payByMonths(dto: PayByMonthsDto, userId: string) {
+  const debt = await this.prisma.debt.findUnique({
+    where: { id: dto.debtId },
+    include: { Payment: { select: { monthNumber: true } } },
+  });
+  if (!debt) throw new NotFoundException('Qarz topilmadi');
+  if (debt.status) throw new BadRequestException('Bu qarz allaqachon yopilgan');
+
+  const paidMonths = debt.Payment.map(p => p.monthNumber).filter((m): m is number => m != null);
+  const allMonths = Array.from({ length: debt.deadline_months }, (_, i) => i + 1);
+  const unpaid = allMonths.filter(m => !paidMonths.includes(m));
+  if (unpaid.length === 0) throw new BadRequestException('Barcha oylar to‘langan');
+
+  const selected = Array.from(new Set(dto.months)).sort((a, b) => a - b);
+
+  // diapazon va ketma-ketlik tekshiruvi
+  for (const m of selected) {
+    if (m < 1 || m > debt.deadline_months) throw new BadRequestException(`${m}-oy mavjud emas`);
+    if (!unpaid.includes(m)) throw new BadRequestException(`${m}-oy allaqachon to‘langan`);
+  }
+  const nextUnpaid = unpaid[0];
+  if (selected[0] !== nextUnpaid) throw new BadRequestException(`Avval ${nextUnpaid}-oy to‘lanishi kerak`);
+  for (let i = 1; i < selected.length; i++) {
+    if (selected[i] !== selected[0] + i) throw new BadRequestException('Oylar ketma-ket bo‘lishi kerak');
   }
 
+  await this.prisma.$transaction(async (tx) => {
+    const agg = await tx.payment.aggregate({ where: { debtId: dto.debtId }, _sum: { amount: true } });
+    const currentPaid = agg._sum.amount ?? 0;
+    const remaining = debt.total_amount - currentPaid;
+
+    const need = selected.length * debt.monthly_amount;
+    if (need > remaining) {
+      throw new BadRequestException(
+        `Qolgan qarz ${remaining.toLocaleString()} so‘m. Kerak: ${need.toLocaleString()} so‘m.`,
+      );
+    }
+
+    await tx.payment.createMany({
+      data: selected.map(m => ({
+        amount: debt.monthly_amount,
+        monthNumber: m,
+        debtId: dto.debtId,
+        userId,
+      })),
+    });
+
+    await this.updateDebtStatus(dto.debtId, tx);
+  });
+
+  return { message: `${selected.length} oy uchun to‘lov qabul qilindi` };
+}
+
+  // ——— Tarix / CRUD ———
   async findAll() {
     const data = await this.prisma.payment.findMany({
-      include: { customer: true, debt: true, user: true },
+      include: { debt: { include: { customer: true } }, user: true },
       orderBy: { createdAt: 'desc' },
     });
     return { data };
@@ -162,7 +160,7 @@ export class PaymentService {
   async findOne(id: string) {
     const data = await this.prisma.payment.findUnique({
       where: { id },
-      include: { customer: true, debt: true, user: true },
+      include: { debt: { include: { customer: true } }, user: true },
     });
     if (!data) throw new NotFoundException("To'lov topilmadi");
     return { data };
@@ -191,3 +189,262 @@ export class PaymentService {
     return { message: "To'lov o'chirildi", data: deleted };
   }
 }
+
+
+
+
+
+
+//   // ixtiyoriy: tarix endpointlari
+//   async findAll() {
+//     const data = await this.prisma.payment.findMany({
+//       include: { debt: { include: { customer: true } }, user: true },
+//       orderBy: { createdAt: 'desc' },
+//     });
+//     return { data };
+//   }
+
+//   async findOne(id: string) {
+//     const data = await this.prisma.payment.findUnique({
+//       where: { id },
+//       include: { debt: { include: { customer: true } }, user: true },
+//     });
+//     if (!data) throw new NotFoundException("To'lov topilmadi");
+//     return { data };
+//   }
+// }
+
+
+
+
+
+
+
+
+// import {
+//   BadRequestException,
+//   Injectable,
+//   NotFoundException,
+//   HttpException,
+// } from '@nestjs/common';
+// import { PrismaService } from 'src/prisma/prisma.service';
+// import { CreatePaymentDto } from './dto/create-payment.dto';
+// import { UpdatePaymentDto } from './dto/update-payment.dto';
+// import { PaymentMethod } from '@prisma/client';
+
+// @Injectable()
+// export class PaymentService {
+//   constructor(private prisma: PrismaService) { }
+
+//   async create(dto: CreatePaymentDto, userId: string) {
+//     try {
+//       const { method, amount, debtId  } = dto;
+      
+
+//        const result = await this.prisma.$transaction(async (tx) => {
+//        const debt = await tx.debt.findUnique({
+//           where: { id: debtId },
+//           include: { Payment: true , customer:true},
+//         });
+      
+
+//       if (!debt) throw new NotFoundException('DebtId topilmadi');
+//       const paymentsToCreate: any[] = [];
+
+    
+        
+
+//           if (method === PaymentMethod.FULL) {
+//             if (debt.Payment.length > 0)
+//               throw new BadRequestException("Bu qarzga allaqachon to'lov qilingan");
+
+//             if (amount !== debt.total_amount)
+//               throw new BadRequestException("To'liq to'lov uchun miqdor noto'g'ri");
+
+//             paymentsToCreate.push({
+//               amount,
+//               method,
+//               debtId,
+//               userId,
+//             });
+
+//             await tx.debt.update({
+//               where: { id: debtId },
+//               data: {
+//                 paid_amount: amount,
+//                 status: true,
+//               },
+//             });
+//           }
+
+
+//           else if (method === PaymentMethod.BY_MONTH) {
+//             const paidMonths = debt.Payment
+//               .filter((p) => p.monthNumber !== null)
+//               .map((p) => p.monthNumber);
+
+//             const unpaidMonths = Array.from(
+//               { length: debt.deadline_months },
+//               (_, i) => i + 1,
+//             ).filter((m) => !paidMonths.includes(m));
+
+//             const remainingDebt = debt.total_amount - debt.paid_amount;
+
+//             if (amount < debt.monthly_amount) {
+//               throw new BadRequestException(`Minimal oylik to'lov miqdori ${debt.monthly_amount} so'm. Faqat to'liq oylik to'lovlar qabul qilinadi.`);
+//             }
+
+//             if (amount > remainingDebt) {
+//               throw new BadRequestException(`Siz  ortiqcha to'lov qilyapsiz. Qolgan qarz miqdori ${remainingDebt} so'm.`);
+//             }
+
+//             if (amount % debt.monthly_amount !== 0) {
+//               const acceptedAmount = Math.floor(amount / debt.monthly_amount) * debt.monthly_amount;
+//               const extra = amount - acceptedAmount;
+//               throw new BadRequestException(
+//                 `Faqat to'liq oylik to'lovlar qabul qilinadi (${debt.monthly_amount} so'm). ` +
+//                 `Siz ${extra} so'm ortiqcha kiritdingiz.`
+//               );
+//             }
+
+
+//             const maxPayableMonths = Math.floor(amount / debt.monthly_amount);
+//             const monthsToPay = unpaidMonths.slice(0, maxPayableMonths);
+//             const totalPaid = monthsToPay.length * debt.monthly_amount;
+
+//             if (monthsToPay.length === 0) {
+//               throw new BadRequestException("Barcha oylar to'langan");
+//             }
+
+//             // 5. Kiritilgan oylik miqdor kerakli oylardan oshib ketmasligi kerak
+//             if (totalPaid !== amount) {
+//               throw new BadRequestException("Kiritilgan to'lov noto'g'ri oyliklarga to'g'ri kelmadi");
+//             }
+
+//             for (const month of monthsToPay) {
+//               paymentsToCreate.push({
+//                 amount: debt.monthly_amount,
+//                 method,
+//                 monthNumber: month,
+//                 debtId,
+//                 userId,
+//               });
+//             }
+
+//             const updated = await tx.debt.update({
+//               where: { id: debtId },
+//               data: {
+//                 paid_amount: { increment: totalPaid },
+//               },
+//               select: { paid_amount: true, total_amount: true },
+//             });
+
+//             if (updated.paid_amount >= updated.total_amount) {
+//               await tx.debt.update({
+//                 where: { id: debtId },
+//                 data: { status: true },
+//               });
+//             }
+//           }
+
+//           else if (method === PaymentMethod.PARTIAL) {
+//             if (amount <= 0) {
+//               throw new BadRequestException("To'lov miqdori nol yoki manfiy bo'lishi mumkin emas");}
+
+//             const remainingAmount = debt.total_amount - debt.paid_amount;
+
+//             if (amount > remainingAmount) {
+//               throw new BadRequestException(
+//                 `Sizning qolgan qarzingiz ${remainingAmount.toLocaleString()} so'm. ` +
+//                 `Siz kiritgan miqdor esa ${amount.toLocaleString()} so'm. ` +
+//                 `Iltimos, ortiqcha pul to'lamang.`
+//               );
+//             }
+
+//             paymentsToCreate.push({
+//               amount,
+//               method,
+//               debtId,
+//               userId,
+//             });
+
+//             const updated = await tx.debt.update({
+//               where: { id: debtId },
+//               data: {
+//                 paid_amount: { increment: amount },
+//               },
+//               select: { paid_amount: true, total_amount: true },
+//             });
+
+//             if (updated.paid_amount >= updated.total_amount) {
+//               await tx.debt.update({
+//                 where: { id: debtId },
+//                 data: { status: true },
+//               });
+//             }
+//           }
+
+
+//           await tx.payment.createMany({ data: paymentsToCreate });
+
+//           return paymentsToCreate;
+          
+//            });
+       
+     
+
+//       return {
+//         message: "To'lov muvaffaqiyatli bajarildi",
+//         data: result,
+//       };
+//     } catch (error) {
+//       throw new BadRequestException(error.message || 'Xatolik yuz berdi');
+//     }
+//   }
+
+
+
+//   async findAll() {
+//     const data = await this.prisma.payment.findMany({
+//       include: { customer: true, debt: true, user: true },
+//       orderBy: { createdAt: 'desc' },
+//     });
+//     return { data };
+//   }
+
+//   async findOne(id: string) {
+//     const data = await this.prisma.payment.findUnique({
+//       where: { id },
+//       include: { customer: true, debt: true, user: true },
+//     });
+//     if (!data) throw new NotFoundException("To'lov topilmadi");
+//     return { data };
+//   }
+
+//   async update(id: string, dto: UpdatePaymentDto) {
+//     const exist = await this.prisma.payment.findUnique({ where: { id } });
+//     if (!exist) throw new NotFoundException("To'lov topilmadi");
+
+//     const updated = await this.prisma.payment.update({
+//       where: { id },
+//       data: dto,
+//     });
+
+//     await this.updateDebtStatus(updated.debtId);
+//     return { message: "To'lov yangilandi", data: updated };
+//   }
+//   updateDebtStatus(debtId: string) {
+//     throw new Error('Method not implemented.');
+//   }
+
+//   async remove(id: string) {
+//     const exist = await this.prisma.payment.findUnique({ where: { id } });
+//     if (!exist) throw new NotFoundException("To'lov topilmadi");
+
+//     const deleted = await this.prisma.payment.delete({ where: { id } });
+//     await this.updateDebtStatus(deleted.debtId);
+
+//     return { message: "To'lov o'chirildi", data: deleted };
+//   }
+// }
+

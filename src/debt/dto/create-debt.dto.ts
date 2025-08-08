@@ -15,12 +15,12 @@ export class CreateDebtDto {
   @IsNotEmpty()
   customerId: string;
 
-  @ApiProperty({ example: 600000 })
+  @ApiProperty({ example: 600 })
   @IsInt()
   @IsNotEmpty()
   total_amount: number;
 
-  @ApiProperty({ example: 100000 })
+  @ApiProperty({ example: 100 })
   @IsInt()
   @IsNotEmpty()
   monthly_amount: number;
@@ -35,7 +35,7 @@ export class CreateDebtDto {
   @IsNotEmpty()
   startDate: string;
 
-  @ApiProperty({ example: 'LG Televizor 55"' })
+  @ApiProperty({ example: 'SAMSUNG GALAXY S21' })
   @IsString()
   @IsNotEmpty()
   productName: string;
@@ -45,6 +45,11 @@ export class CreateDebtDto {
   @IsString()
   note?: string;
 
-  
+  @ApiProperty({ type: [String], example: ['image1.jpg', 'image2.png'] })
+  @IsArray()
+  @IsOptional()
+  images?: string[];
+
+
 }
 

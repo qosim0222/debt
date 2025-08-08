@@ -18,15 +18,16 @@ export class CreateCustomerDto {
     note: string
 
 
-    @ApiProperty({ type: [String], example: ['+998901234567', '+998901234567'] })
+    @ApiProperty({ type: [String], example: ['+998901234568', '+998901234567'] })
     @IsArray()
     @IsOptional()
-    @Matches(/^\+998[0-9]{2}\d{7}$/, { message: "Telefon raqami formati faqat: +998901234567 bo'lishi kerak" })
+    @IsString({each:true})
+    @Matches(/^\+998[0-9]{2}\d{7}$/, { message: "Telefon raqami formati faqat: +998901234567 bo'lishi kerak", each:true })
     phones?: string[];
 
     @ApiProperty({ type: [String], example: ['image1.jpg', 'image2.png'] })
     @IsArray()
     @IsOptional()
     images?: string[];
-
 }
+

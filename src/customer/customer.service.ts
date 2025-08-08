@@ -10,18 +10,25 @@ import { UpdateCustomerDto } from './dto/update-customer.dto';
 
 @Injectable()
 export class CustomerService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
 
   async create(dto: CreateCustomerDto, userId: string) {
     try {
-      const isExist = await this.prisma.customer.findFirst({
-        where: {
-          fullname: dto.fullname,
-        },
-      });
-      if (isExist) {
-        throw new BadRequestException('Bu mijoz allaqachon mavjud');
+      if (dto.phones?.length) {
+        const existingPhones = await this.prisma.customerPhone.findMany({
+          where: {
+            phone: { in: dto.phones },
+          },
+          select: { phone: true },
+        });
+
+        if (existingPhones.length > 0) {
+          const list = existingPhones.map((p) => p.phone).join(', ');
+          throw new BadRequestException(
+            `Quyidagi telefon raqam(lar)i allaqachon ro'yxatdan o'tgan: ${list}`
+          );
+        }
       }
 
       const result = await this.prisma.$transaction(async (tx) => {
@@ -34,25 +41,25 @@ export class CustomerService {
           },
         });
 
-        
-          if (dto.phones?.length) {
-            await tx.customerPhone.createMany({
-              data: dto.phones.map((phone) => ({
-                phone,
-                customerId: customer.id,
-              })),
-            });
-          }
 
-          
-          if (dto.images?.length) {
-            await tx.customerImage.createMany({
-              data: dto.images.map((image) => ({
-                image,
-                customerId: customer.id,
-              })),
-            });
-          }
+        if (dto.phones?.length) {
+          await tx.customerPhone.createMany({
+            data: dto.phones.map((phone) => ({
+              phone,
+              customerId: customer.id,
+            })),
+          });
+        }
+
+
+        if (dto.images?.length) {
+          await tx.customerImage.createMany({
+            data: dto.images.map((image) => ({
+              image,
+              customerId: customer.id,
+            })),
+          });
+        }
 
         return customer;
       });
@@ -66,9 +73,9 @@ export class CustomerService {
   async findAll() {
     try {
       const data = await this.prisma.customer.findMany({
-        include:  {
-          CustomerPhone: {select:{phone:true}},
-          CustomerImage:{select:{image:true}},
+        include: {
+          CustomerPhone: { select: { phone: true } },
+          CustomerImage: { select: { image: true } },
           Debt: true,
         },
         orderBy: {
@@ -81,14 +88,14 @@ export class CustomerService {
     }
   }
 
-  
+
   async findOne(id: string) {
     try {
       const data = await this.prisma.customer.findUnique({
         where: { id },
         include: {
-          CustomerPhone: true,
-          CustomerImage: true,
+          CustomerPhone: { select: { phone: true } },
+          CustomerImage: { select: { image: true } },
           Debt: {
             include: {
               Payment: true,
@@ -108,7 +115,7 @@ export class CustomerService {
     }
   }
 
-  
+
   async update(id: string, dto: UpdateCustomerDto) {
     try {
       const exist = await this.prisma.customer.findUnique({ where: { id } });
@@ -142,22 +149,30 @@ export class CustomerService {
       throw new BadRequestException(error.message);
     }
   }
-
-  async getCustomerDebts(id: string) {
-    try {
-      const customer = await this.prisma.customer.findUnique({
-        where: { id },
-        include: {
-          Debt: {
-            include: { Payment: true },
+async getCustomerDebts(id: string) {
+  try {
+    const customer = await this.prisma.customer.findUnique({
+      where: { id },
+      include: {
+        Debt: {
+          select: {
+            total_amount: true,
+            paid_amount: true,
           },
         },
-      });
+      },
+    });
 
-      if (!customer) throw new NotFoundException('Mijoz topilmadi');
-      return { data: customer.Debt };
-    } catch (error) {
-      throw new BadRequestException(error.message);
-    }
+    if (!customer) throw new NotFoundException('Mijoz topilmadi');
+
+    const totalRemaining = customer.Debt.reduce(
+      (sum, debt) => sum + (debt.total_amount - (debt.paid_amount ?? 0)),
+      0,
+    );
+
+    return { totalRemaining };
+  } catch (error) {
+    throw new BadRequestException(error.message);
   }
+}
 }

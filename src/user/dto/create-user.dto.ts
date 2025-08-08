@@ -8,7 +8,7 @@ export class CreateUserDto {
     @IsNotEmpty()
     fullname: string;
 
-    @ApiProperty({ example: 'alicho' })
+    @ApiProperty({ example: 'ali' })
     @IsString()
     @IsNotEmpty()
     userName: string;
@@ -29,12 +29,12 @@ export class CreateUserDto {
     @IsOptional()
     image: string;
 
-    @ApiProperty({ example: '0222' })
+    @ApiProperty({ example: '1207' })
     @IsString()
     @IsNotEmpty()
     password: string;
 
-    @ApiProperty({ example: 'SELLER', enum: userRole })
-    @IsEnum(userRole)
-    role: userRole;
+    // @ApiProperty({ example: 'SELLER', enum: userRole })
+    // @IsEnum(userRole)
+    // role: userRole;
 }

@@ -10,41 +10,73 @@ import { UpdateDebtDto } from './dto/update-debt.dto';
 
 @Injectable()
 export class DebtService {
-  constructor(private prisma: PrismaService) {}
-async create(dto: CreateDebtDto) {
-  try {
-    const { customerId, total_amount, monthly_amount, deadline_months } = dto;
+  constructor(private prisma: PrismaService) { }
+  async create(dto: CreateDebtDto) {
+    try {
+      const { customerId, total_amount, monthly_amount, deadline_months } = dto;
+      const customer = await this.prisma.customer.findUnique({
+        where: { id: customerId },
+      });
+      if (!customer) {
+        throw new NotFoundException('Mijoz topilmadi');
+      }
 
-    // 1. Mijoz borligini tekshiramiz
-    const customer = await this.prisma.customer.findUnique({
-      where: { id: customerId },
-    });
-    if (!customer) {
-      throw new NotFoundException('Mijoz topilmadi');
+      // 2) Biznes qoidalar
+      if (monthly_amount && deadline_months) {
+        if (monthly_amount <= 0 || deadline_months <= 0) {
+          throw new BadRequestException('Oylik to‘lov va oylar soni 0 dan katta bo‘lishi kerak');
+        }
+        const calc = monthly_amount * deadline_months;
+        if (calc !== total_amount) {
+          throw new BadRequestException(
+            `Oylik to‘lov (${monthly_amount}) * oylar soni (${deadline_months}) umumiy qarzga teng emas. Kiritilgan: ${calc}, kerak: ${total_amount}`,
+          );
+        }
+      }
+
+      // 3) Hammasini bitta tranzaksiyada
+      const created = await this.prisma.$transaction(async (tx) => {
+        const debt = await tx.debt.create({
+          data: {
+            customerId: dto.customerId,
+            total_amount: dto.total_amount,
+            monthly_amount: dto.monthly_amount,
+            deadline_months: dto.deadline_months,
+            startDate: dto.startDate,
+            productName: dto.productName,
+            note: dto.note,
+            paid_amount: 0,
+            status: false,
+          },
+          include:{DebtImage:{select:{image:true}}}
+        });
+
+        if (dto.images?.length) {
+          await tx.debtImage.createMany({
+            data: dto.images.map((image) => ({
+              image,
+              debtId: debt.id, 
+            })),
+          });
+        }
+
+        return debt;
+      });
+
+      return { message: 'Qarz yaratildi', data: created };
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+      throw new BadRequestException(error.message);
     }
-
-    // 2. Oylik miqdor * oylar soni >= umumiy qarz bo‘lishi kerak
-    const totalFromMonthly = monthly_amount * deadline_months;
-    if (totalFromMonthly < total_amount) {
-      throw new BadRequestException(
-        `Har oylik to‘lov (${monthly_amount}) × oylar soni (${deadline_months}) = ${totalFromMonthly}, bu umumiy qarz (${total_amount}) dan kam. Iltimos, ma’lumotlarni tekshiring.`
-      );
-    }
-
-    // 3. Qarzni yaratamiz
-    const data = await this.prisma.debt.create({ data: dto });
-
-    return { message: 'Qarz muvaffaqiyatli yaratildi', data };
-  } catch (error) {
-    throw new BadRequestException(error.message);
   }
-}
 
 
   async findAll() {
     try {
       const data = await this.prisma.debt.findMany({
-        include: { customer: true, Payment: true },
+        include: { customer: true, Payment: true, 
+          DebtImage:{select:{image:true}}},
+        orderBy: { createdAt: 'desc' },
       });
       return { data };
     } catch (error) {
@@ -56,7 +88,9 @@ async create(dto: CreateDebtDto) {
     try {
       const data = await this.prisma.debt.findUnique({
         where: { id },
-        include: { customer: true, Payment: true },
+        include: { customer: true, Payment: true,
+           DebtImage:{select:{image:true}}
+         },
       });
       if (!data) throw new NotFoundException('Qarzdorlik topilmadi');
       return { data };
@@ -76,7 +110,7 @@ async create(dto: CreateDebtDto) {
         data: dto,
       });
 
-      return { data };
+      return { message: 'Qarz yangilandi', data };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new BadRequestException(error.message);
@@ -85,11 +119,18 @@ async create(dto: CreateDebtDto) {
 
   async remove(id: string) {
     try {
-      const exist = await this.prisma.debt.findUnique({ where: { id } });
+      const exist = await this.prisma.debt.findUnique({
+        where: { id },
+        include: { Payment: true },
+      });
       if (!exist) throw new NotFoundException('Qarzdorlik topilmadi');
 
+      if (exist.Payment.length > 0) {
+        throw new BadRequestException('Bu qarz bo‘yicha to‘lovlar mavjud. Avval ularni o‘chirishingiz kerak.');
+      }
+
       const data = await this.prisma.debt.delete({ where: { id } });
-      return { data };
+      return { message: 'Qarz o‘chirildi', data };
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new BadRequestException(error.message);

@@ -3,7 +3,7 @@ import { IsNotEmpty, isString, IsString,  Matches,  MaxLength, MinLength } from 
 
 export class LoginAuthDto {
 
-    @ApiProperty({example:"admin1207"})
+    @ApiProperty({example:"ali"})
     @IsString()
     @IsNotEmpty()
     userName:string

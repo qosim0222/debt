@@ -43,7 +43,6 @@ model Customer {
   CustomerPhone CustomerPhone[]
   CustomerImage CustomerImage[]
   Debt          Debt[]
-  Payment       Payment[]
   Message       Message[]
 }
 
@@ -73,6 +72,7 @@ model Debt {
   total_amount    Int
   monthly_amount  Int
   deadline_months Int
+  paid_amount     Int      @default(0)
   status          Boolean  @default(false) // yopilmagan (so'ndirilmagan)
   startDate       DateTime
   productName     String
@@ -96,19 +96,16 @@ model DebtImage {
 }
 
 model Payment {
-  id          String        @id @default(uuid())
+  id          String   @id @default(uuid())
   amount      Int
-  method      PaymentMethod
-  monthNumber Int? // 1, 2, 3... (faqat oylik bo‘lsa)
+  monthNumber Int?     // faqat oylik bo'lib to'lashda to'ldiriladi (1..deadline_months)
   debtId      String
   userId      String
-  customerId  String
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   debt     Debt     @relation(fields: [debtId], references: [id])
   user     User     @relation(fields: [userId], references: [id])
-  customer Customer @relation(fields: [customerId], references: [id])
 }
 
 model Message {
@@ -138,9 +135,4 @@ enum userRole {
   SELLER
   ADMIN
 }
-  
-enum PaymentMethod {
-  FULL
-  PARTIAL
-  BY_MONTH
-}
+

@@ -14,7 +14,7 @@ import *as bcrypt from "bcrypt"
 export class UserService {
   constructor(private prisma: PrismaService) { }
   async create(dto: CreateUserDto) {
-    const { userName, password } = dto;
+    const { userName, password, phone } = dto;
 
     try {
       const existingUser = await this.prisma.user.findUnique({
@@ -24,6 +24,14 @@ export class UserService {
       if (existingUser) {
         throw new ConflictException('Foydalanuvchi allaqachon mavjud');
       }
+
+       const existingPhone = await this.prisma.user.findUnique({
+      where: { phone },
+    });
+
+    if (existingPhone) {
+      throw new ConflictException('Bu telefon raqam allaqachon ro‘yxatdan o‘tgan');
+    }
 
       const hashedPassword = await bcrypt.hash(password, 10);
 
