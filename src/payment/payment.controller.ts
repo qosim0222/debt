@@ -1,10 +1,11 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Request, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Request, UseGuards, Query } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { UpdatePaymentDto } from './dto/update-payment.dto';
 import { AuthGuard } from 'src/guards/auth.guard';
 import { OneMonthPaymentDto } from './dto/one-month-payment.dto.ts';
 import { AnyAmountPaymentDto } from './dto/any-amount-payment.dto';
 import { PayByMonthsDto } from './dto/by-months.dto';
+import { ApiQuery } from '@nestjs/swagger';
 
 @UseGuards(AuthGuard)
 @Controller('payment')
@@ -28,11 +29,31 @@ export class PaymentController {
     return this.paymentService.payByMonths(dto, req.user.id);
   }
 
+@UseGuards(AuthGuard)
+@Get()
+@ApiQuery({ name: 'debtId', required: false, type: String, description: 'Qarz ID bo‘yicha filtrlash' })
+@ApiQuery({ name: 'page', required: false, type: Number, example: 1 })
+@ApiQuery({ name: 'limit', required: false, type: Number, example: 10 })
+@ApiQuery({
+  name: 'sortOrder',
+  required: false,
+  enum: ['asc', 'desc'],
+  example: 'desc',
+})
+findAll(
+  @Query('debtId') debtId?: string,
+  @Query('page') page: number = 1,
+  @Query('limit') limit: number = 10,
+  @Query('sortOrder') sortOrder: 'asc' | 'desc' = 'desc',
+) {
+  return this.paymentService.findAll(
+    debtId,
+    Number(page),
+    Number(limit),
+    sortOrder,
+  );
+}
 
-  @Get()
-  findAll() {
-    return this.paymentService.findAll();
-  }
 
   @Get(':id')
   findOne(@Param('id') id: string) {

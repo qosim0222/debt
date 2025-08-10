@@ -148,14 +148,45 @@ async payByMonths(dto: PayByMonthsDto, userId: string) {
   return { message: `${selected.length} oy uchun to‘lov qabul qilindi` };
 }
 
-  // ——— Tarix / CRUD ———
-  async findAll() {
-    const data = await this.prisma.payment.findMany({
-      include: { debt: { include: { customer: true } }, user: true },
-      orderBy: { createdAt: 'desc' },
-    });
-    return { data };
+async findAll(
+  debtId?: string,
+  page: number = 1,
+  limit: number = 10,
+  sortOrder: 'asc' | 'desc' = 'desc',
+) {
+  try {
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (debtId) {
+      where.debtId = debtId;
+    }
+
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.payment.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          debt: { include: { customer: true } },
+          user: true,
+        },
+        orderBy: { createdAt: sortOrder },
+      }),
+      this.prisma.payment.count({ where }),
+    ]);
+
+    return {
+      data,
+      total,
+      currentPage: page,
+      totalPages: Math.ceil(total / limit),
+    };
+  } catch (error) {
+    throw new BadRequestException(error.message);
   }
+}
+
 
   async findOne(id: string) {
     const data = await this.prisma.payment.findUnique({

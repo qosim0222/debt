@@ -1,19 +1,19 @@
-import { ApiProperty } from "@nestjs/swagger";
-import { IsNotEmpty, IsString } from "class-validator";
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class CreateMessageDto {
-  @ApiProperty({ example: "Message" })
-  @IsString()
-  @IsNotEmpty()
-  text: string;
-
-  @ApiProperty({ example: "uuid-mijoz-id" })
-  @IsString()
+  @ApiProperty({ example: 'uuid-customer-id' })
+  @IsUUID()
   @IsNotEmpty()
   customerId: string;
 
-  @ApiProperty({ example: "uuid-sample-id" })
+  // @ApiPropertyOptional({ example: 'uuid-sample-id' })
+  @IsUUID()
+  @IsOptional()
+  sampleId?: string;
+
+  @ApiProperty({ example: 'Assalomu alaykum, eslatma...' })
   @IsString()
   @IsNotEmpty()
-  sampleId: string;
+  text: string;
 }

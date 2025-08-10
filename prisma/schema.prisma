@@ -28,6 +28,7 @@ model User {
   Customer Customer[]
   Payment  Payment[]
   Sample   Sample[]
+  Message  Message[]
 }
 
 model Customer {
@@ -98,32 +99,38 @@ model DebtImage {
 model Payment {
   id          String   @id @default(uuid())
   amount      Int
-  monthNumber Int?     // faqat oylik bo'lib to'lashda to'ldiriladi (1..deadline_months)
+  monthNumber Int? // faqat oylik bo'lib to'lashda to'ldiriladi (1..deadline_months)
   debtId      String
   userId      String
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  debt     Debt     @relation(fields: [debtId], references: [id])
-  user     User     @relation(fields: [userId], references: [id])
+  debt Debt @relation(fields: [debtId], references: [id])
+  user User @relation(fields: [userId], references: [id])
 }
 
 model Message {
-  id         String   @id @default(uuid())
-  text       String
+  id         String    @id @default(uuid())
   customerId String
+  userId     String?
   sampleId   String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  text       String
+  status     MsgStatus
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   customer Customer @relation(fields: [customerId], references: [id])
   sample   Sample?  @relation(fields: [sampleId], references: [id])
+  user     User?    @relation(fields: [userId], references: [id])
 }
 
+
 model Sample {
-  id        String   @id @default(uuid())
-  text      String
-  userId    String
+  id       String  @id @default(uuid())
+  text     String
+  userId   String
+  isActive Boolean @default(true)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -136,3 +143,8 @@ enum userRole {
   ADMIN
 }
 
+
+enum MsgStatus {
+  SENT
+  FAILED
+}

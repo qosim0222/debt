@@ -5,12 +5,17 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { ApiQuery } from '@nestjs/swagger';
 import { AuthGuard } from 'src/guards/auth.guard';
 import {  ResetPasswordDto } from 'src/auth/dto/login-auth.dto';
+import { RolesGuard } from 'src/guards/roles.guard';
+import { Roles } from 'src/guards/role.decorator';
+import { userRole } from '@prisma/client';
 
 @Controller('user')
 export class UserController {
   authService: any;
   constructor(private readonly userService: UserService) {}
 
+  @Roles(userRole.ADMIN)
+  @UseGuards(AuthGuard, RolesGuard)
   @Post()
   create(@Body() createUserDto: CreateUserDto) {
     return this.userService.create(createUserDto);
@@ -47,7 +52,9 @@ findAll(
     return this.userService.update(id, updateUserDto);
   }
 
-  @UseGuards(AuthGuard)
+  
+  @Roles(userRole.ADMIN)
+  @UseGuards(AuthGuard, RolesGuard)
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.userService.remove(id);

@@ -41,23 +41,60 @@ export class AuthService {
       throw new BadRequestException(error.message || 'Serverda xatolik');
     }
   }
+async me_data(req: Request) {
+  const user = req['user'];
+  try {
+    
+    const me = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: {
+        id: true,
+        fullname: true,
+        userName: true,
+        phone: true,
+        adress: true,
+        image: true,
+        role: true,
+        createdAt: true,
+      },
+    });
+    if (!me) throw new NotFoundException('Foydalanuvchi topilmadi');
 
+    
+    const [aggDebt, customersCount, debtsCount, paymentsCount] =
+      await this.prisma.$transaction([
+        this.prisma.debt.aggregate({
+          where: { customer: { userId: user.id } },
+          _sum: { total_amount: true, paid_amount: true },
+        }),
+        this.prisma.customer.count({ where: { userId: user.id } }),
+        this.prisma.debt.count({ where: { customer: { userId: user.id } } }),
+        this.prisma.payment.count({
+          where: { debt: { customer: { userId: user.id } } },
+        }),
+      ]);
 
+    const totalAmount = aggDebt._sum.total_amount ?? 0;
+    const totalPaid   = aggDebt._sum.paid_amount ?? 0;
+    const remaining   = totalAmount - totalPaid;
 
-  async me_data(req: Request) {
-    const user = req['user'];
-    try {
-      
-      const data = await this.prisma.user.findUnique({
-        where: { id: user.id },
-        omit: { password: true },
-      });
-
-      return { data };
-    } catch (error) {
-      throw new BadRequestException(error?.message);
-    }
+    return {
+      data: me,
+      stats: {
+        customers: customersCount,
+        debts: debtsCount,
+        payments: paymentsCount,
+        totalAmount,
+        totalPaid,
+        remaining,
+      },
+    };
+  } catch (error) {
+    throw new BadRequestException(error?.message);
   }
+}
+
+
   
   async refreshToken(refreshToken: string) {
     try {

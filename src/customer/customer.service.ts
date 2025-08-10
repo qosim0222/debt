@@ -70,23 +70,53 @@ export class CustomerService {
     }
   }
 
-  async findAll() {
-    try {
-      const data = await this.prisma.customer.findMany({
+  
+async findAll(
+  search?: string,
+  page: number = 1,
+  limit: number = 10,
+  sortBy: 'createdAt' | 'fullname' = 'createdAt',
+  sortOrder: 'asc' | 'desc' = 'desc',
+) {
+  try {
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (search) {
+      where.OR = [
+        { fullname: { contains: search, mode: 'insensitive' } },
+        { CustomerPhone: { some: { phone: { contains: search } } } },
+      ];
+    }
+
+    const [data, total] = await this.prisma.$transaction([
+      this.prisma.customer.findMany({
+        where,
+        skip,
+        take: limit,
         include: {
           CustomerPhone: { select: { phone: true } },
           CustomerImage: { select: { image: true } },
           Debt: true,
         },
         orderBy: {
-          createdAt: 'desc',
+          [sortBy]: sortOrder,
         },
-      });
-      return { data };
-    } catch (error) {
-      throw new BadRequestException(error.message);
-    }
+      }),
+      this.prisma.customer.count({ where }),
+    ]);
+
+    return {
+      data,
+      total,
+      currentPage: page,
+      totalPages: Math.ceil(total / limit),
+    };
+  } catch (error) {
+    throw new BadRequestException(error.message);
   }
+}
+
 
 
   async findOne(id: string) {
@@ -165,14 +195,15 @@ async getCustomerDebts(id: string) {
 
     if (!customer) throw new NotFoundException('Mijoz topilmadi');
 
-    const totalRemaining = customer.Debt.reduce(
+    const totalDebt = customer.Debt.reduce(
       (sum, debt) => sum + (debt.total_amount - (debt.paid_amount ?? 0)),
       0,
     );
 
-    return { totalRemaining };
+    return { totalDebt };
   } catch (error) {
     throw new BadRequestException(error.message);
   }
 }
 }
+

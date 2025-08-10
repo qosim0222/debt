@@ -30,7 +30,7 @@ export class UserService {
     });
 
     if (existingPhone) {
-      throw new ConflictException('Bu telefon raqam allaqachon ro‘yxatdan o‘tgan');
+      throw new ConflictException("Bu telefon raqam allaqachon ro'yxatdan o'tgan");
     }
 
       const hashedPassword = await bcrypt.hash(password, 10);
@@ -73,27 +73,18 @@ export class UserService {
       ];
     }
 
-    const [users, total] = await this.prisma.$transaction([
-      this.prisma.user.findMany({
-        skip,
-        take: limit,
-        where,
-      }),
-      this.prisma.user.count({ where }),
-    ]);
+   
+      const [users, total] = await this.prisma.$transaction([
+        this.prisma.user.findMany({ skip, take: limit, where, orderBy: { createdAt: 'desc' } }),
+        this.prisma.user.count({ where }),
+      ]);
 
-    const totalPages = Math.ceil(total / limit);
-
-    return {
-      data: users,
-      total,
-      currentPage: page,
-      totalPages,
-    };
-  } catch (error) {
-    throw new BadRequestException(error.message);
+      return { data: users, total, currentPage: page, totalPages: Math.ceil(total / limit) };
+    } catch (error) {
+      throw new BadRequestException(error.message);
+    }
   }
-}
+
 
 
 

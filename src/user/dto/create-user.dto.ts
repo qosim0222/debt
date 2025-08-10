@@ -1,6 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger";
 import { userRole } from "@prisma/client";
-import { IsEnum, IsNotEmpty, IsOptional, IsString, Matches, matches } from "class-validator";
+import { IsEnum, IsNotEmpty, IsOptional, IsString, Matches, matches, MaxLength, MinLength } from "class-validator";
 
 export class CreateUserDto {
     @ApiProperty({ example: 'Ali Valiyev' })
@@ -27,14 +27,15 @@ export class CreateUserDto {
     @ApiProperty({ example: 'image url' })
     @IsString()
     @IsOptional()
-    image: string;
+    image?: string;
 
     @ApiProperty({ example: '1207' })
     @IsString()
     @IsNotEmpty()
+    @MinLength(4)
+    @MaxLength(32)
+    @Matches(/^[a-zA-Z0-9]+$/, { message: "Parol faqat harf va raqamlardan iborat bo'lsin" })
     password: string;
 
-    // @ApiProperty({ example: 'SELLER', enum: userRole })
-    // @IsEnum(userRole)
-    // role: userRole;
+
 }
