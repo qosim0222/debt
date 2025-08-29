@@ -18,10 +18,9 @@ export class AuthController {
     return this.authService.refreshToken(dto.refreshToken);
   }
 
-  
-  @UseGuards(AuthGuard)
+   @UseGuards(AuthGuard)
   @Get('my_data')
-  me(@Req() req: Request) {
+  me(@Req() req: any) {
     return this.authService.me_data(req);
   }
 

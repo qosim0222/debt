@@ -117,8 +117,6 @@ async findAll(
   }
 }
 
-
-
   async findOne(id: string) {
     try {
       const data = await this.prisma.customer.findUnique({
@@ -179,6 +177,7 @@ async findAll(
       throw new BadRequestException(error.message);
     }
   }
+  
 async getCustomerDebts(id: string) {
   try {
     const customer = await this.prisma.customer.findUnique({

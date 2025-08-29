@@ -18,8 +18,8 @@ import { EskizService } from './eskiz/eskiz.service';
 @Module({
   imports: [PrismaModule,  ConfigModule.forRoot({isGlobal:true}),
     ServeStaticModule.forRoot({
-      rootPath:join(__dirname, '..', 'uploads'),
-      serveRoot:'/uploads'
+     rootPath: join(process.cwd(), 'uploads'),
+      serveRoot: '/uploads',
     }),
      AuthModule,
     UserModule,

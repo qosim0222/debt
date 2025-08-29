@@ -11,6 +11,8 @@ async function bootstrap() {
 
   app.useGlobalPipes(new ValidationPipe())
 
+  app.enableCors()
+
   const config = new DocumentBuilder()
   .setTitle('Nasiya savdo')
   .setDescription('The nasiya API description')

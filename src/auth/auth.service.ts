@@ -41,56 +41,67 @@ export class AuthService {
       throw new BadRequestException(error.message || 'Serverda xatolik');
     }
   }
-async me_data(req: Request) {
-  const user = req['user'];
+  
+  // auth.service.ts
+async me_data(req: any) {
   try {
-    
-    const me = await this.prisma.user.findUnique({
-      where: { id: user.id },
-      select: {
-        id: true,
-        fullname: true,
-        userName: true,
-        phone: true,
-        adress: true,
-        image: true,
-        role: true,
-        createdAt: true,
-      },
+    const userId = req.user.id;
+
+    // Umumiy qarz summasi
+    const totalDebtAgg = await this.prisma.debt.aggregate({
+      _sum: { total_amount: true },
+      where: {
+        customer: { userId }
+      }
     });
-    if (!me) throw new NotFoundException('Foydalanuvchi topilmadi');
 
-    
-    const [aggDebt, customersCount, debtsCount, paymentsCount] =
-      await this.prisma.$transaction([
-        this.prisma.debt.aggregate({
-          where: { customer: { userId: user.id } },
-          _sum: { total_amount: true, paid_amount: true },
-        }),
-        this.prisma.customer.count({ where: { userId: user.id } }),
-        this.prisma.debt.count({ where: { customer: { userId: user.id } } }),
-        this.prisma.payment.count({
-          where: { debt: { customer: { userId: user.id } } },
-        }),
-      ]);
+    // Kechiktirilgan to‘lovlar soni
+    const overdueDebtsCount = await this.prisma.debt.count({
+      where: {
+        customer: { userId },
+        status: false,
+        startDate: { lt: new Date() }
+      }
+    });
 
-    const totalAmount = aggDebt._sum.total_amount ?? 0;
-    const totalPaid   = aggDebt._sum.paid_amount ?? 0;
-    const remaining   = totalAmount - totalPaid;
+    // Mijozlar soni
+    const debtorsCount = await this.prisma.customer.count({
+      where: { userId }
+    });
+
+    // Foydalanuvchi ma’lumotlari
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        fullname: true,
+        image: true,
+        phone:true,
+        userName:true
+      }
+    });
+
+    // Hamyon — to‘langan pullar yig‘indisi
+    const walletAgg = await this.prisma.payment.aggregate({
+      _sum: { amount: true },
+      where: {
+        debt: { customer: { userId } }
+      }
+    });
 
     return {
-      data: me,
-      stats: {
-        customers: customersCount,
-        debts: debtsCount,
-        payments: paymentsCount,
-        totalAmount,
-        totalPaid,
-        remaining,
-      },
+      data: {
+        fullName: user?.fullname || '',
+        img: user?.image || '',
+        phone:user?.phone|| '',
+        userName: user?.userName|| '',
+        totalDebt: totalDebtAgg._sum.total_amount || 0,
+        overdueDebts: overdueDebtsCount || 0,
+        debtors: debtorsCount || 0,
+        wallet: walletAgg._sum.amount || 0
+      }
     };
   } catch (error) {
-    throw new BadRequestException(error?.message);
+    throw new BadRequestException(error.message);
   }
 }
 
@@ -139,5 +150,6 @@ async me_data(req: Request) {
       expiresIn: '5d',
     });
   }
+
 }
 
